@@ -1,14 +1,14 @@
 <template>
-  <div class="bg-gray-900 rounded-xl p-3">
+  <div class="bg-gray-900 rounded-xl p-4">
     <div class="flex items-center justify-between mb-3">
       <h3 class="text-sm text-gray-400 font-bold">交接班摘要</h3>
       <div class="flex gap-2">
-        <button v-if="!store.shiftActive" @click="store.startShift()"
+        <button v-if="!store.shiftActive && !store.lastShiftSummary" @click="store.startShift()"
           class="bg-blue-700 hover:bg-blue-600 text-white text-xs px-3 py-1 rounded">
           开始班次
         </button>
-        <template v-else>
-          <button @click="copySummary"
+        <template v-if="store.shiftActive">
+          <button @click="copySummary(shiftSummaryText)"
             class="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-1 rounded">
             复制摘要
           </button>
@@ -17,113 +17,122 @@
             结束班次
           </button>
         </template>
+        <template v-if="!store.shiftActive && store.lastShiftSummary">
+          <button @click="copySummary(lastSummaryText)"
+            class="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-1 rounded">
+            复制摘要
+          </button>
+          <button @click="store.dismissLastSummary(); store.startShift()"
+            class="bg-blue-700 hover:bg-blue-600 text-white text-xs px-3 py-1 rounded">
+            开始新班次
+          </button>
+          <button @click="store.dismissLastSummary()"
+            class="bg-gray-800 hover:bg-gray-700 text-gray-400 text-xs px-2 py-1 rounded">
+            关闭
+          </button>
+        </template>
       </div>
     </div>
 
-    <div v-if="!store.shiftActive && !store.shiftStart" class="text-gray-600 text-xs text-center py-6">
+    <div v-if="!store.shiftActive && !store.lastShiftSummary" class="text-gray-600 text-xs text-center py-6">
       点击「开始班次」记录本班次数据
     </div>
 
-    <div v-else class="space-y-3">
+    <div v-else-if="store.shiftActive" class="space-y-3">
       <div class="flex items-center gap-3 text-xs">
         <span class="text-gray-400">
           班次时长: <span class="text-white font-mono">{{ store.shiftSummary.durationMinutes.toFixed(1) }} min</span>
         </span>
-        <span v-if="store.shiftActive" class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+        <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
         <span v-if="store.shiftStart" class="text-gray-500">
-          {{ new Date(store.shiftStart).toLocaleTimeString() }} -
-          <template v-if="store.shiftActive">至今</template>
+          {{ new Date(store.shiftStart).toLocaleTimeString() }} - 至今
         </span>
       </div>
 
-      <div class="grid grid-cols-3 gap-2">
-        <div class="bg-gray-800 rounded-lg p-2 text-center">
-          <div class="text-lg font-bold text-orange-400">{{ store.shiftSummary.alarmStats.total }}</div>
-          <div class="text-xs text-gray-500">告警总数</div>
-        </div>
-        <div class="bg-gray-800 rounded-lg p-2 text-center">
-          <div class="text-lg font-bold text-green-400">{{ store.shiftSummary.alarmStats.acknowledged }}</div>
-          <div class="text-xs text-gray-500">已确认</div>
-        </div>
-        <div class="bg-gray-800 rounded-lg p-2 text-center">
-          <div class="text-lg font-bold text-yellow-400">{{ store.shiftSummary.alarmStats.unacknowledged }}</div>
-          <div class="text-xs text-gray-500">未确认</div>
-        </div>
-      </div>
+      <AlarmStatsGrid :stats="store.shiftSummary.alarmStats" />
+      <AlarmLevelBadges :stats="store.shiftSummary.alarmStats" />
+      <OfflineDevices v-if="store.shiftSummary.offlineDevices.length" :devices="store.shiftSummary.offlineDevices" />
+      <PeakDataGrid v-if="store.shiftSummary.peakData.length" :peaks="store.shiftSummary.peakData" />
+    </div>
 
-      <div class="flex gap-2 text-xs">
-        <span class="bg-red-900/50 text-red-300 px-2 py-0.5 rounded">
-          严重 {{ store.shiftSummary.alarmStats.critical }}
+    <div v-else-if="store.lastShiftSummary" class="space-y-3">
+      <div class="bg-green-900/30 border border-green-800 rounded-lg p-2 text-xs text-green-300 mb-2">
+        班次已结束 — 摘要如下
+      </div>
+      <div class="flex items-center gap-3 text-xs">
+        <span class="text-gray-400">
+          班次时长: <span class="text-white font-mono">{{ store.lastShiftSummary.durationMinutes.toFixed(1) }} min</span>
         </span>
-        <span class="bg-yellow-900/50 text-yellow-300 px-2 py-0.5 rounded">
-          警告 {{ store.shiftSummary.alarmStats.warning }}
-        </span>
-        <span class="bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded">
-          信息 {{ store.shiftSummary.alarmStats.info }}
+        <span v-if="store.lastShiftSummary.shiftStart" class="text-gray-500">
+          {{ new Date(store.lastShiftSummary.shiftStart).toLocaleTimeString() }}
+          <template v-if="store.lastShiftSummary.shiftEnd">
+            → {{ new Date(store.lastShiftSummary.shiftEnd).toLocaleTimeString() }}
+          </template>
         </span>
       </div>
 
-      <div v-if="store.shiftSummary.offlineDevices.length" class="bg-gray-800 rounded-lg p-2">
-        <div class="text-xs text-gray-400 mb-1 font-bold">离线设备</div>
-        <div v-for="ev in store.shiftSummary.offlineDevices" :key="ev.deviceId" class="flex items-center justify-between text-xs py-1">
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full" :class="ev.stillOffline ? 'bg-red-500' : 'bg-green-500'"></span>
-            <span class="text-gray-300">{{ ev.deviceName }}</span>
-          </div>
-          <div class="text-gray-500">
-            <template v-if="ev.wentOfflineAt">
-              {{ new Date(ev.wentOfflineAt).toLocaleTimeString() }}
-            </template>
-            <template v-if="ev.cameBackAt">
-              → {{ new Date(ev.cameBackAt).toLocaleTimeString() }}
-            </template>
-            <template v-if="ev.stillOffline">
-              <span class="text-red-400"> (仍离线)</span>
-            </template>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="store.shiftSummary.peakData.length" class="bg-gray-800 rounded-lg p-2">
-        <div class="text-xs text-gray-400 mb-1 font-bold">峰值数据</div>
-        <div class="grid grid-cols-2 gap-1">
-          <div v-for="p in store.shiftSummary.peakData" :key="`${p.deviceName}_${p.registerName}`"
-            class="flex justify-between text-xs bg-gray-900 rounded px-2 py-1">
-            <span class="text-gray-400 truncate mr-2">{{ p.deviceName }} · {{ p.registerName }}</span>
-            <span class="text-orange-400 font-mono whitespace-nowrap">{{ p.peakValue.toFixed(p.peakValue > 100 ? 0 : 1) }} {{ p.unit }}</span>
-          </div>
-        </div>
-      </div>
+      <AlarmStatsGrid :stats="store.lastShiftSummary.alarmStats" />
+      <AlarmLevelBadges :stats="store.lastShiftSummary.alarmStats" />
+      <OfflineDevices v-if="store.lastShiftSummary.offlineDevices.length" :devices="store.lastShiftSummary.offlineDevices" />
+      <PeakDataGrid v-if="store.lastShiftSummary.peakData.length" :peaks="store.lastShiftSummary.peakData" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useModbusStore } from '../store/modbus'
+import AlarmStatsGrid from './shift/AlarmStatsGrid.vue'
+import AlarmLevelBadges from './shift/AlarmLevelBadges.vue'
+import OfflineDevices from './shift/OfflineDevices.vue'
+import PeakDataGrid from './shift/PeakDataGrid.vue'
 
 const store = useModbusStore()
 
+const shiftSummaryText = computed(() => buildText(store.shiftSummary))
+const lastSummaryText = computed(() => store.lastShiftSummary ? buildText(store.lastShiftSummary) : '')
+
 function handleEndShift() {
-  const text = buildSummaryText()
+  const text = shiftSummaryText.value
   store.endShift()
-  navigator.clipboard?.writeText(text)
+  copyToClipboard(text)
 }
 
-function copySummary() {
-  const text = buildSummaryText()
-  navigator.clipboard?.writeText(text)
+function copySummary(text: string) {
+  copyToClipboard(text)
 }
 
-function buildSummaryText(): string {
-  const s = store.shiftSummary
+async function copyToClipboard(text: string) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      fallbackCopy(text)
+    }
+  } catch {
+    fallbackCopy(text)
+  }
+}
+
+function fallbackCopy(text: string) {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.left = '-9999px'
+  document.body.appendChild(ta)
+  ta.select()
+  try { document.execCommand('copy') } catch {}
+  document.body.removeChild(ta)
+}
+
+function buildText(s: { shiftStart: number | null; shiftEnd: number | null; durationMinutes: number; alarmStats: { total: number; acknowledged: number; unacknowledged: number; critical: number; warning: number; info: number }; offlineDevices: { deviceName: string; wentOfflineAt: number | null; cameBackAt: number | null; stillOffline: boolean }[]; peakData: { deviceName: string; registerName: string; peakValue: number; unit: string }[] }): string {
   const lines: string[] = []
   lines.push('=== 交接班摘要 ===')
-  if (store.shiftStart) {
-    lines.push(`班次开始: ${new Date(store.shiftStart).toLocaleString()}`)
-  }
+  if (s.shiftStart) lines.push(`班次开始: ${new Date(s.shiftStart).toLocaleString()}`)
+  if (s.shiftEnd) lines.push(`班次结束: ${new Date(s.shiftEnd).toLocaleString()}`)
   lines.push(`班次时长: ${s.durationMinutes.toFixed(1)} min`)
   lines.push('')
-  lines.push(`--- 告警处理 ---`)
+  lines.push('--- 告警处理 ---')
   lines.push(`告警总数: ${s.alarmStats.total}`)
   lines.push(`已确认: ${s.alarmStats.acknowledged}  未确认: ${s.alarmStats.unacknowledged}`)
   lines.push(`严重: ${s.alarmStats.critical}  警告: ${s.alarmStats.warning}  信息: ${s.alarmStats.info}`)

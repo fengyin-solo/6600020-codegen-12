@@ -15,12 +15,14 @@ export const useModbusStore = defineStore('modbus', () => {
   const shiftAlarmLog = ref<Alarm[]>([])
   const shiftOfflineLog = ref<OfflineEvent[]>([])
   const shiftPeakData = ref<Record<string, PeakRecord>>({})
+  const lastShiftSummary = ref<ShiftSummary | null>(null)
+  const nowTick = ref(Date.now())
 
   const criticalAlarms = computed(() => alarms.value.filter(a => a.level === 'critical' && !a.acknowledged))
   const onlineDevices = computed(() => devices.value.filter(d => d.online))
 
   const shiftSummary = computed<ShiftSummary>(() => {
-    const now = Date.now()
+    const now = nowTick.value
     const start = shiftStart.value ?? now
     const duration = (now - start) / 60000
     const totalAlarms = shiftAlarmLog.value.length
@@ -74,12 +76,15 @@ export const useModbusStore = defineStore('modbus', () => {
     selectedDevice.value = devices.value[0]
   }
 
+  let _tickTimer: number | null = null
+
   function startShift() {
     shiftActive.value = true
     shiftStart.value = Date.now()
     shiftAlarmLog.value = []
     shiftOfflineLog.value = []
     shiftPeakData.value = {}
+    lastShiftSummary.value = null
     for (const dev of devices.value) {
       if (!dev.online) {
         shiftOfflineLog.value.push({
@@ -88,11 +93,18 @@ export const useModbusStore = defineStore('modbus', () => {
         })
       }
     }
+    _tickTimer = window.setInterval(() => { nowTick.value = Date.now() }, 1000)
   }
 
   function endShift() {
+    lastShiftSummary.value = { ...shiftSummary.value, shiftEnd: Date.now() }
     shiftActive.value = false
     shiftStart.value = null
+    if (_tickTimer) { clearInterval(_tickTimer); _tickTimer = null }
+  }
+
+  function dismissLastSummary() {
+    lastShiftSummary.value = null
   }
 
   function simulatePoll() {
@@ -170,8 +182,8 @@ export const useModbusStore = defineStore('modbus', () => {
   return {
     devices, alarms, historyData, isPolling, pollInterval, selectedDevice,
     criticalAlarms, onlineDevices,
-    shiftActive, shiftStart, shiftAlarmLog, shiftOfflineLog, shiftPeakData, shiftSummary,
+    shiftActive, shiftStart, shiftAlarmLog, shiftOfflineLog, shiftPeakData, shiftSummary, lastShiftSummary,
     initMockDevices, simulatePoll, acknowledgeAlarm, toggleDevice,
-    startShift, endShift,
+    startShift, endShift, dismissLastSummary,
   }
 })
