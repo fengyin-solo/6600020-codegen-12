@@ -34,6 +34,10 @@
         </div>
       </div>
 
+      <div class="mt-2">
+        <ShiftSummary />
+      </div>
+
       <div class="text-xs text-gray-600 mt-auto">
         在线: {{ store.onlineDevices.length }}/{{ store.devices.length }}
       </div>
@@ -82,6 +86,7 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useModbusStore } from './store/modbus'
 import TrendChart from './components/TrendChart.vue'
+import ShiftSummary from './components/ShiftSummary.vue'
 
 const store = useModbusStore()
 let timer: number | null = null

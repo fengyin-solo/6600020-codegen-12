@@ -26,3 +26,37 @@ export interface Alarm {
   timestamp: number
   acknowledged: boolean
 }
+
+export interface AlarmStat {
+  total: number
+  acknowledged: number
+  unacknowledged: number
+  critical: number
+  warning: number
+  info: number
+}
+
+export interface OfflineEvent {
+  deviceId: string
+  deviceName: string
+  wentOfflineAt: number | null
+  cameBackAt: number | null
+  stillOffline: boolean
+}
+
+export interface PeakRecord {
+  deviceName: string
+  registerName: string
+  peakValue: number
+  unit: string
+  peakTime: number
+}
+
+export interface ShiftSummary {
+  shiftStart: number | null
+  shiftEnd: number | null
+  durationMinutes: number
+  alarmStats: AlarmStat
+  offlineDevices: OfflineEvent[]
+  peakData: PeakRecord[]
+}

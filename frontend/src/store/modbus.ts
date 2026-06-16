@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
-import type { Device, Alarm, ModbusRegister } from '../types'
+import type { Device, Alarm, ModbusRegister, ShiftSummary, AlarmStat, OfflineEvent, PeakRecord } from '../types'
 
 export const useModbusStore = defineStore('modbus', () => {
   const devices = ref<Device[]>([])
@@ -10,8 +10,33 @@ export const useModbusStore = defineStore('modbus', () => {
   const pollInterval = ref(1000)
   const selectedDevice = ref<Device | null>(null)
 
+  const shiftActive = ref(false)
+  const shiftStart = ref<number | null>(null)
+  const shiftAlarmLog = ref<Alarm[]>([])
+  const shiftOfflineLog = ref<OfflineEvent[]>([])
+  const shiftPeakData = ref<Record<string, PeakRecord>>({})
+
   const criticalAlarms = computed(() => alarms.value.filter(a => a.level === 'critical' && !a.acknowledged))
   const onlineDevices = computed(() => devices.value.filter(d => d.online))
+
+  const shiftSummary = computed<ShiftSummary>(() => {
+    const now = Date.now()
+    const start = shiftStart.value ?? now
+    const duration = (now - start) / 60000
+    const totalAlarms = shiftAlarmLog.value.length
+    const acknowledged = shiftAlarmLog.value.filter(a => a.acknowledged).length
+    const critical = shiftAlarmLog.value.filter(a => a.level === 'critical').length
+    const warning = shiftAlarmLog.value.filter(a => a.level === 'warning').length
+    const info = shiftAlarmLog.value.filter(a => a.level === 'info').length
+    return {
+      shiftStart: shiftStart.value,
+      shiftEnd: null,
+      durationMinutes: Math.round(duration * 10) / 10,
+      alarmStats: { total: totalAlarms, acknowledged, unacknowledged: totalAlarms - acknowledged, critical, warning, info },
+      offlineDevices: [...shiftOfflineLog.value],
+      peakData: Object.values(shiftPeakData.value),
+    }
+  })
 
   function initMockDevices() {
     devices.value = [
@@ -49,6 +74,27 @@ export const useModbusStore = defineStore('modbus', () => {
     selectedDevice.value = devices.value[0]
   }
 
+  function startShift() {
+    shiftActive.value = true
+    shiftStart.value = Date.now()
+    shiftAlarmLog.value = []
+    shiftOfflineLog.value = []
+    shiftPeakData.value = {}
+    for (const dev of devices.value) {
+      if (!dev.online) {
+        shiftOfflineLog.value.push({
+          deviceId: dev.id, deviceName: dev.name,
+          wentOfflineAt: Date.now(), cameBackAt: null, stillOffline: true,
+        })
+      }
+    }
+  }
+
+  function endShift() {
+    shiftActive.value = false
+    shiftStart.value = null
+  }
+
   function simulatePoll() {
     for (const dev of devices.value) {
       if (!dev.online) continue
@@ -65,14 +111,25 @@ export const useModbusStore = defineStore('modbus', () => {
             historyData.value[key].time.shift()
             historyData.value[key].values.shift()
           }
-          // Check thresholds
+          if (shiftActive.value) {
+            const peakKey = `${dev.id}_${reg.name}`
+            const current = shiftPeakData.value[peakKey]
+            if (!current || reg.value > current.peakValue) {
+              shiftPeakData.value[peakKey] = {
+                deviceName: dev.name, registerName: reg.name,
+                peakValue: reg.value, unit: reg.unit, peakTime: Date.now(),
+              }
+            }
+          }
           if (reg.name === '温度' && reg.value > 28) {
-            alarms.value.unshift({
+            const alarm: Alarm = {
               id: `a_${Date.now()}`, deviceId: dev.id, register: reg.name,
               message: `${dev.name} ${reg.name}超限: ${reg.value}${reg.unit}`,
               level: reg.value > 30 ? 'critical' : 'warning',
               timestamp: Date.now(), acknowledged: false
-            })
+            }
+            alarms.value.unshift(alarm)
+            if (shiftActive.value) shiftAlarmLog.value.unshift({ ...alarm })
           }
         }
       }
@@ -83,16 +140,38 @@ export const useModbusStore = defineStore('modbus', () => {
   function acknowledgeAlarm(id: string) {
     const a = alarms.value.find(a => a.id === id)
     if (a) a.acknowledged = true
+    const sa = shiftAlarmLog.value.find(a => a.id === id)
+    if (sa) sa.acknowledged = true
   }
 
   function toggleDevice(id: string) {
     const d = devices.value.find(d => d.id === id)
-    if (d) d.online = !d.online
+    if (!d) return
+    const wasOnline = d.online
+    d.online = !d.online
+    if (shiftActive.value) {
+      if (wasOnline && !d.online) {
+        shiftOfflineLog.value.push({
+          deviceId: d.id, deviceName: d.name,
+          wentOfflineAt: Date.now(), cameBackAt: null, stillOffline: true,
+        })
+      } else if (!wasOnline && d.online) {
+        for (const ev of shiftOfflineLog.value) {
+          if (ev.deviceId === d.id && ev.stillOffline) {
+            ev.cameBackAt = Date.now()
+            ev.stillOffline = false
+            break
+          }
+        }
+      }
+    }
   }
 
   return {
     devices, alarms, historyData, isPolling, pollInterval, selectedDevice,
     criticalAlarms, onlineDevices,
-    initMockDevices, simulatePoll, acknowledgeAlarm, toggleDevice
+    shiftActive, shiftStart, shiftAlarmLog, shiftOfflineLog, shiftPeakData, shiftSummary,
+    initMockDevices, simulatePoll, acknowledgeAlarm, toggleDevice,
+    startShift, endShift,
   }
 })
